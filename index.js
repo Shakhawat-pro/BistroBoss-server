@@ -56,7 +56,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    client.connect();
 
     const userCollection = client.db('bistroDB').collection('users')
     const menuCollection = client.db('bistroDB').collection('menu')
@@ -78,7 +78,7 @@ async function run() {
       const query = { email: email };
       const user = await userCollection.findOne(query);
       const isAdmin = user?.role === 'admin';
-      console.log(isAdmin);
+      // console.log(isAdmin);
       if (!isAdmin) {
         return res.status(401).send({ message: 'Unauthorized access' });
       }
@@ -87,7 +87,7 @@ async function run() {
 
     // user related api
 
-    app.get('/users', verifyToken, verifyAdmin, async(req, res) => {
+    app.get('/users', verifyToken, verifyAdmin, async (req, res) => {
       // console.log(req.headers);
       const result = await userCollection.find().toArray()
       res.send(result)
@@ -149,15 +149,15 @@ async function run() {
       const result = await menuCollection.findOne(query);
       res.send(result);
     })
-    app.post('/menu',verifyToken, verifyAdmin, async (req, res) => {
+    app.post('/menu', verifyToken, verifyAdmin, async (req, res) => {
       const item = req.body
-      const  result = await menuCollection.insertOne(item)
+      const result = await menuCollection.insertOne(item)
       res.send(result)
     })
-    app.patch('/menu/:id', async(req, res) => {
+    app.patch('/menu/:id', async (req, res) => {
       const item = req.body
       const id = req.params.id
-      const filter = {_id: new ObjectId(id)}
+      const filter = { _id: new ObjectId(id) }
       const updatedDoc = {
         $set: {
           name: item.name,
@@ -170,7 +170,7 @@ async function run() {
       const result = await menuCollection.updateOne(filter, updatedDoc)
       res.send(result)
     })
-    app.delete('/menu/:id', verifyToken, verifyAdmin, async(req, res) => {
+    app.delete('/menu/:id', verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id
       const query = { _id: new ObjectId(id) }
       const result = await menuCollection.deleteOne(query)
@@ -222,10 +222,10 @@ async function run() {
         clientSecret: paymentIntent.client_secret
       })
     });
-    app.get('/payments/:email',verifyToken, async(req, res) => {
+    app.get('/payments/:email', verifyToken, async (req, res) => {
       const query = { email: req.params.email }
       // console.log(query);
-      if(req.params.email !== req.decoded.email){
+      if (req.params.email !== req.decoded.email) {
         return res.status(401).send({ message: 'Forbidden Access' })
       }
       const result = await paymentCollection.find(query).toArray()
@@ -233,32 +233,183 @@ async function run() {
       res.send(result)
     })
 
-    app.post('/payments', async(req, res) => {
+    app.post('/payments', async (req, res) => {
       const payment = req.body;
       const paymentResult = await paymentCollection.insertOne(payment)
       console.log('payment info', payment);
       // carefully delete each item from the cart
-      const query = {_id: {
-        $in: payment.cartIds.map(id => new ObjectId(id))
-      } }
+      const query = {
+        _id: {
+          $in: payment.cartIds.map(id => new ObjectId(id))
+        }
+      }
 
       const deleteResult = await cartCollection.deleteMany(query)
-      
-      res.send({paymentResult, deleteResult})
+
+      res.send({ paymentResult, deleteResult })
     })
- 
-    
+
+
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
     });
 
+    // status or analytics
+
+    app.get('/admin-status', verifyToken, verifyAdmin, async (req, res) => {
+      const users = await userCollection.estimatedDocumentCount()
+      const menuItems = await menuCollection.estimatedDocumentCount()
+      const orders = await paymentCollection.estimatedDocumentCount()
+
+      // // This is not the best way
+      // // const payments = await paymentCollection.find({}, { projection: { price: 1, _id: 0 } }).toArray(); Chat gpt 
+      // const payments = await paymentCollection.find().toArray()
+      // const revenue = payments.reduce((total, payment) => total + payment.price, 0)
+
+      // Best way
+
+      const result = await paymentCollection.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$price' }
+          }
+        }
+      ]).toArray()
+
+      const revenue = result.length > 0 ? result[0].totalRevenue : 0
+
+      res.send({
+        users,
+        menuItems,
+        orders,
+        revenue,
+        result
+      })
+    })
+
+    // using aggregate pipeline
+    // using aggregate pipeline
+    // app.get('/order-stats', async (req, res) => {
+    //   try {
+    //     console.log("Fetching order stats...");
+
+    //     // Ensure menuItemIds are ObjectIds
+    //     const mismatchedIds = await paymentCollection.aggregate([
+    //       {
+    //         $unwind: '$menuItemIds'
+    //       },
+    //       {
+    //         $addFields: {
+    //           menuItemIds: { $toObjectId: '$menuItemIds' }
+    //         }
+    //       },
+    //       {
+    //         $lookup: {
+    //           from: "menu",
+    //           localField: "menuItemIds",
+    //           foreignField: "_id",
+    //           as: "menuItems"
+    //         }
+    //       },
+    //       {
+    //         $match: {
+    //           menuItems: []
+    //         }
+    //       }
+    //     ]).toArray();
+
+    //     if (mismatchedIds.length > 0) {
+    //       console.log("Mismatched menuItemIds found:", mismatchedIds);
+    //       return res.status(500).send({ message: "Mismatched menuItemIds found", mismatchedIds });
+    //     }
+
+    //     console.log("No mismatched menuItemIds found, proceeding with aggregation...");
+
+    //     // Proceed with the original aggregation
+    //     const result = await paymentCollection.aggregate([
+    //       {
+    //         $unwind: '$menuItemIds'
+    //       },
+    //       {
+    //         $addFields: {
+    //           menuItemIds: { $toObjectId: '$menuItemIds' }
+    //         }
+    //       },
+    //       {
+    //         $lookup: {
+    //           from: 'menu',
+    //           localField: 'menuItemIds',
+    //           foreignField: '_id',
+    //           as: 'menuItems'
+    //         }
+    //       }
+    //     ]).toArray();
+
+    //     console.log("Order stats retrieved:", result);
+    //     res.send(result);
+    //   } catch (error) {
+    //     console.error("Error fetching order stats:", error);
+    //     res.status(500).send({ message: "Internal server error" });
+    //   }
+    // });
+
+
+
+
+
+    app.get('/order-stats', verifyToken, verifyAdmin, async (req, res) => {
+      const result = await paymentCollection.aggregate([
+        {
+          $unwind: '$menuItemIds'
+        },
+        {
+          $addFields: {
+            menuItemIds: { $toObjectId: '$menuItemIds' }
+          }
+        },
+        {
+          $lookup: {
+            from: 'menu',
+            localField: 'menuItemIds',
+            foreignField: '_id',
+            as: 'menuItems'
+          }
+        },
+        {
+          $unwind: '$menuItems'
+        },
+        {
+          $group: {
+            _id: '$menuItems.category',
+            quantity: { $sum: 1 },
+            revenue: { $sum: '$menuItems.price' }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            category: '$_id',
+            quantity: '$quantity',
+            revenue: '$revenue'
+          }
+        }
+
+      ]).toArray();
+      res.send(result);
+    });
+
+
+
+
+
 
 
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
